@@ -1,0 +1,16 @@
+.{
+    .name = .zmap,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .fingerprint = 0x492aec4de22395ac,
+    .description = "ECMAScript-compatible Map implementation (insertion-ordered, SameValueZero keys) in Zig",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src/",
+        "README.md",
+    },
+    .dependencies = .{
+        .zequality = .{ .path = "../z-equality" },
+    },
+}
