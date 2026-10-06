@@ -131,3 +131,46 @@ test "clear() empties the map" {
     try testing.expectEqual(@as(usize, 0), map.size());
     try testing.expect(!map.has(1));
 }
+
+test "fetchDelete() removes the key and returns the stored entry" {
+    var map = ZMap(i32, []const u8).init(testing.allocator);
+    defer map.deinit();
+
+    try map.set(1, "one");
+    try map.set(2, "two");
+    try map.set(3, "three");
+
+    const entry = map.fetchDelete(2).?;
+    try testing.expectEqual(@as(i32, 2), entry.key);
+    try testing.expectEqualStrings("two", entry.value);
+    try testing.expect(!map.has(2));
+    // Ordered removal, same as delete(): survivors keep their order.
+    try testing.expectEqualSlices(i32, &[_]i32{ 1, 3 }, map.keys());
+}
+
+test "fetchDelete() of a missing key returns null and changes nothing" {
+    var map = ZMap(i32, i32).init(testing.allocator);
+    defer map.deinit();
+
+    try map.set(1, 10);
+    try testing.expect(map.fetchDelete(2) == null);
+    try testing.expectEqual(@as(usize, 1), map.size());
+}
+
+test "fetchDelete() with an equal-but-distinct key returns the STORED key" {
+    // []const u8 keys compare by content (SameValueZero over the bytes), so
+    // a lookup key in a different buffer finds the entry -- and the caller
+    // must get back the stored slice, not its own, to release the right one.
+    var map = ZMap([]const u8, i32).init(testing.allocator);
+    defer map.deinit();
+
+    const stored = "key".*;
+    var lookup = "key".*;
+    try map.set(&stored, 42);
+
+    const entry = map.fetchDelete(&lookup).?;
+    try testing.expect(entry.key.ptr == &stored);
+    try testing.expect(entry.key.ptr != &lookup);
+    try testing.expectEqual(@as(i32, 42), entry.value);
+    try testing.expectEqual(@as(usize, 0), map.size());
+}

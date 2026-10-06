@@ -66,6 +66,16 @@ pub fn ZMap(comptime K: type, comptime V: type) type {
             return self.storage.orderedRemove(key);
         }
 
+        /// Like delete(), but hands back the entry that was removed -- the
+        /// key and value as STORED, which may be a different (equal) object
+        /// than the `key` passed in. Ownership of both moves to the caller.
+        /// Returns null if the key wasn't present. Same ordered removal as
+        /// delete().
+        pub fn fetchDelete(self: *Self, key: K) ?Entry {
+            const kv = self.storage.fetchOrderedRemove(key) orelse return null;
+            return .{ .key = kv.key, .value = kv.value };
+        }
+
         pub fn clear(self: *Self) void {
             self.storage.clearRetainingCapacity();
         }
