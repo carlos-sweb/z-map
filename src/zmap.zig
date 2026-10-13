@@ -1,3 +1,6 @@
+//! Insertion-ordered maps with SameValueZero key comparison.
+//! Keys and values are stored by value; callers own any referenced data.
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const zequality = @import("zequality");
@@ -20,7 +23,7 @@ fn MapContext(comptime K: type) type {
     };
 }
 
-/// Generic ECMAScript-compatible Map implementation. Array-backed (not a
+/// Generic Map with ECMAScript-inspired key comparison. Array-backed (not a
 /// plain hashmap) so iteration order is insertion order, per ECMA-262 Map
 /// semantics — simpler than Object's OrdinaryOwnPropertyKeys (no
 /// array-index-keys-first partitioning; Map order is pure insertion order
@@ -36,10 +39,12 @@ pub fn ZMap(comptime K: type, comptime V: type) type {
         storage: std.array_hash_map.Custom(K, V, MapContext(K), false),
         allocator: Allocator,
 
+        /// Create an empty map using `allocator` for its storage.
         pub fn init(allocator: Allocator) Self {
             return .{ .storage = .empty, .allocator = allocator };
         }
 
+        /// Free map storage. Referenced keys and values remain caller-owned.
         pub fn deinit(self: *Self) void {
             self.storage.deinit(self.allocator);
         }
@@ -48,14 +53,17 @@ pub fn ZMap(comptime K: type, comptime V: type) type {
         /// extensible checks (Map has no such concept). Setting an existing
         /// key updates its value WITHOUT moving its position in iteration
         /// order (only delete()+set() moves a key, to the end).
+        /// Returns error.OutOfMemory if storage cannot grow.
         pub fn set(self: *Self, key: K, value: V) !void {
             try self.storage.put(self.allocator, key, value);
         }
 
+        /// Return the value for `key`, or null if the key is absent.
         pub fn get(self: *const Self, key: K) ?V {
             return self.storage.get(key);
         }
 
+        /// Return whether `key` exists using SameValueZero comparison.
         pub fn has(self: *const Self, key: K) bool {
             return self.storage.contains(key);
         }
@@ -76,28 +84,34 @@ pub fn ZMap(comptime K: type, comptime V: type) type {
             return .{ .key = kv.key, .value = kv.value };
         }
 
+        /// Remove all entries while retaining allocated capacity.
         pub fn clear(self: *Self) void {
             self.storage.clearRetainingCapacity();
         }
 
+        /// Return the number of entries.
         pub fn size(self: *const Self) usize {
             return self.storage.count();
         }
 
-        /// Map.prototype.keys() - insertion order.
+        /// Borrowed mutable keys in insertion order, not an ECMAScript iterator.
+        /// Do not modify keys; structural mutations invalidate this view.
         pub fn keys(self: *const Self) []K {
             return self.storage.keys();
         }
 
-        /// Map.prototype.values() - insertion order.
+        /// Borrowed mutable values in insertion order, not an ECMAScript iterator.
+        /// Structural mutations invalidate this view.
         pub fn values(self: *const Self) []V {
             return self.storage.values();
         }
 
+        /// A key of type K and its associated value of type V.
         pub const Entry = struct { key: K, value: V };
 
-        /// Map.prototype.entries() - insertion order. Caller frees the
+        /// Snapshot of entries in insertion order. Caller frees the
         /// returned slice with `allocator`.
+        /// Returns error.OutOfMemory if the snapshot cannot be allocated.
         pub fn entries(self: *const Self, allocator: Allocator) ![]Entry {
             const ks = self.storage.keys();
             const vs = self.storage.values();
@@ -106,7 +120,8 @@ pub fn ZMap(comptime K: type, comptime V: type) type {
             return list;
         }
 
-        /// Map.prototype.forEach() - insertion order.
+        /// Visit entries in insertion order with (context, key, value).
+        /// Callbacks must not structurally mutate the map.
         pub fn forEach(
             self: *const Self,
             context: anytype,
@@ -118,6 +133,8 @@ pub fn ZMap(comptime K: type, comptime V: type) type {
         }
 
         /// Build a ZMap from a slice of {key, value} pairs, in order.
+        /// Duplicate keys update their value at the first insertion position.
+        /// Returns error.OutOfMemory and frees partial storage on allocation failure.
         pub fn fromSlice(allocator: Allocator, pairs: []const Entry) !Self {
             var map = Self.init(allocator);
             errdefer map.deinit();

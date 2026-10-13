@@ -174,3 +174,109 @@ test "fetchDelete() with an equal-but-distinct key returns the STORED key" {
     try testing.expectEqual(@as(i32, 42), entry.value);
     try testing.expectEqual(@as(usize, 0), map.size());
 }
+
+test "distinct NaN payloads and signed zero share entries with an indexed map" {
+    var map = ZMap(f64, i32).init(testing.allocator);
+    defer map.deinit();
+    // Exercise the hash index as well as the small-map linear lookup path.
+    for (1..100) |i| try map.set(@floatFromInt(i), @intCast(i));
+    const nan1: f64 = @bitCast(@as(u64, 0x7ff8000000000001));
+    const nan2: f64 = @bitCast(@as(u64, 0xfff8000000000042));
+    try map.set(nan1, 100);
+    try map.set(nan2, 200);
+    try map.set(-0.0, 300);
+    try map.set(0.0, 400);
+    try testing.expectEqual(@as(usize, 101), map.size());
+    try testing.expectEqual(@as(?i32, 200), map.get(nan1));
+    try testing.expectEqual(@as(?i32, 400), map.get(-0.0));
+    try testing.expect(map.delete(nan2));
+    try testing.expect(!map.has(nan1));
+    try testing.expect(map.delete(0.0));
+    try testing.expect(!map.has(-0.0));
+}
+
+test "float hashing supports f32 f64 and f128 in Zig 0.17" {
+    inline for (.{ f32, f64, f128 }) |Float| {
+        var map = ZMap(Float, u8).init(testing.allocator);
+        defer map.deinit();
+        try map.set(std.math.nan(Float), 1);
+        try map.set(std.math.nan(Float), 2);
+        try map.set(-0.0, 3);
+        try map.set(0.0, 4);
+        try testing.expectEqual(@as(usize, 2), map.size());
+        try testing.expectEqual(@as(?u8, 2), map.get(std.math.nan(Float)));
+        try testing.expectEqual(@as(?u8, 4), map.get(-0.0));
+    }
+}
+
+test "fromSlice duplicate keys update values at their first insertion position" {
+    const Map = ZMap(i32, i32);
+    var map = try Map.fromSlice(testing.allocator, &.{
+        .{ .key = 3, .value = 30 },
+        .{ .key = 1, .value = 10 },
+        .{ .key = 3, .value = 300 },
+    });
+    defer map.deinit();
+    try testing.expectEqualSlices(i32, &.{ 3, 1 }, map.keys());
+    try testing.expectEqualSlices(i32, &.{ 300, 10 }, map.values());
+    try testing.expectEqual(@as(?i32, null), map.get(99));
+}
+
+test "object pointer keys use identity even when fields are equal" {
+    const Object = struct { value: i32 };
+    var a = Object{ .value = 1 };
+    var b = Object{ .value = 1 };
+    var map = ZMap(*Object, i32).init(testing.allocator);
+    defer map.deinit();
+    try map.set(&a, 10);
+    try testing.expect(!map.has(&b));
+    try map.set(&b, 20);
+    a.value = 2;
+    try testing.expectEqual(@as(?i32, 10), map.get(&a));
+    try testing.expectEqual(@as(usize, 2), map.size());
+}
+
+test "optional values distinguish an absent entry from a stored null" {
+    var map = ZMap(i32, ?i32).init(testing.allocator);
+    defer map.deinit();
+    try map.set(1, null);
+    try testing.expect(map.has(1));
+    try testing.expect(map.get(1) != null);
+    try testing.expect(map.get(1).? == null);
+    try testing.expect(map.get(2) == null);
+}
+
+test "clear and ordered deletion preserve lookup correctness after growing" {
+    var map = ZMap(i32, i32).init(testing.allocator);
+    defer map.deinit();
+    for (0..100) |i| try map.set(@intCast(i), @intCast(i * 10));
+    try testing.expect(map.delete(50));
+    for (0..100) |i| {
+        if (i == 50) continue;
+        try testing.expectEqual(@as(?i32, @intCast(i * 10)), map.get(@intCast(i)));
+    }
+    try map.set(50, 500);
+    try testing.expectEqual(@as(i32, 50), map.keys()[99]);
+    map.clear();
+    try testing.expectEqual(@as(usize, 0), map.size());
+    try testing.expectEqual(@as(usize, 0), map.keys().len);
+    try testing.expectEqual(@as(usize, 0), map.values().len);
+    try testing.expect(!map.delete(50));
+    try map.set(200, 2000);
+    try testing.expectEqualSlices(i32, &.{200}, map.keys());
+}
+
+test "fromSlice and entries clean up correctly on allocation failure" {
+    try testing.checkAllAllocationFailures(testing.allocator, struct {
+        fn run(allocator: std.mem.Allocator) !void {
+            const Map = ZMap(i32, i32);
+            var pairs: [100]Map.Entry = undefined;
+            for (&pairs, 0..) |*pair, i| pair.* = .{ .key = @intCast(i), .value = @intCast(i) };
+            var map = try Map.fromSlice(allocator, &pairs);
+            defer map.deinit();
+            const entries = try map.entries(allocator);
+            defer allocator.free(entries);
+            try testing.expectEqual(@as(usize, 100), entries.len);
+        }
+    }.run, .{});
+}

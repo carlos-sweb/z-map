@@ -1,9 +1,9 @@
 .{
     .name = .zmap,
     .version = "0.1.0",
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0",
     .fingerprint = 0x492aec4de22395ac,
-    .description = "ECMAScript-compatible Map implementation (insertion-ordered, SameValueZero keys) in Zig",
+    .description = "Insertion-ordered Map with SameValueZero key comparison in Zig",
     .paths = .{
         "build.zig",
         "build.zig.zon",
@@ -11,6 +11,9 @@
         "README.md",
     },
     .dependencies = .{
-        .zequality = .{ .path = "../z-equality" },
+        .zequality = .{
+            .url = "https://github.com/carlos-sweb/z-equality/archive/adbdb15316c6d5de64677dfe0d24799a3fb297e9.tar.gz",
+            .hash = "zequality-0.1.0-DIk5OcljAACQJrCNOhi8UM2-BuBYEQvgMj98v2sctab3",
+        },
     },
 }
